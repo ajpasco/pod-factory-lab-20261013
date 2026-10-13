@@ -1,0 +1,75 @@
+name: pr-checks
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+permissions: {}
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: run application code from the pull request
+        run: |
+          cat README.md
+          echo "verify-ok sha=${{ github.event.pull_request.head.sha }} t=$(date -u +%s)" > evidence.txt
+      - name: L2 read-only token must not push to records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name lab; git config user.email lab@example.com
+          git fetch origin records
+          git checkout -B records origin/records
+          echo "forged by verify job" > forged.txt
+          git add forged.txt && git commit -qm forged
+          if git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:records 2>push.log; then
+            echo "L2_FAIL: read-only job pushed to records"; cat push.log; exit 1
+          else
+            echo "L2_OK: push denied"; cat push.log || true
+          fi
+          git checkout -q ${{ github.event.pull_request.head.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence.txt
+  record:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: records
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence
+      - name: write check result to records branch
+        run: |
+          git config user.name lab; git config user.email lab@example.com
+          mkdir -p checks && cp evidence.txt "checks/verify-${{ github.event.pull_request.head.sha }}.txt"
+          git add -A && git commit -qm "check result for ${{ github.event.pull_request.head.sha }}"
+          git push origin HEAD:records && echo "L2_OK: record job pushed"
+  gate-check:
+    needs: record
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: records
+      - name: gate decision from records branch at start time
+        run: |
+          echo "records head at start: $(git rev-parse HEAD)"
+          if [ -f "revocations/${{ github.event.pull_request.head.sha }}" ]; then echo "revoked"; exit 1; fi
+          if [ -f "approvals/${{ github.event.pull_request.head.sha }}" ]; then echo "approved for head"; else echo "no approval for head"; exit 1; fi

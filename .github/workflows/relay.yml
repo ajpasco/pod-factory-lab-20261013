@@ -1,0 +1,20 @@
+name: relay
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        required: true
+        type: string
+permissions:
+  checks: write
+  statuses: write
+jobs:
+  post-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: L3 post a failing gate-check on the head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "dispatched at $(date -u +%s)"
+          gh api "repos/${{ github.repository }}/check-runs" -f name=gate-check -f head_sha="${{ inputs.sha }}" -f status=completed -f conclusion=failure -f "output[title]=approval revoked" -f "output[summary]=posted by relay"
