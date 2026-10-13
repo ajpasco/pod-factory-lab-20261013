@@ -1,4 +1,5 @@
 name: relay
+# registered on main
 on:
   workflow_dispatch:
     inputs:

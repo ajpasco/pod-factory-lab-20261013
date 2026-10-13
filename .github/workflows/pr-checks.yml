@@ -25,9 +25,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set +e
+          tmp=$(mktemp -d)
+          git clone -q --branch records "https://github.com/${{ github.repository }}.git" "$tmp/records"
+          cd "$tmp/records"
           git config user.name lab; git config user.email lab@example.com
-          git fetch origin records
-          git checkout -B records origin/records
           echo "forged by verify job" > forged.txt
           git add forged.txt && git commit -qm forged
           if git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:records 2>push.log; then
@@ -35,7 +37,6 @@ jobs:
           else
             echo "L2_OK: push denied"; cat push.log || true
           fi
-          git checkout -q ${{ github.event.pull_request.head.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: evidence
